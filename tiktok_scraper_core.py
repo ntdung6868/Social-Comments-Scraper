@@ -69,7 +69,7 @@ def init_driver(headless=None, debugger_address=None):
         driver.maximize_window()
         time.sleep(0.3)
         h = driver.get_window_size()["height"]
-        driver.set_window_rect(x=0, y=0, width=320, height=h)
+        driver.set_window_rect(x=0, y=0, width=375, height=h) # Tăng nhẹ width lên 375 (iPhone X) cho dễ nhìn hơn chút
     except: pass
 
     return driver
@@ -121,7 +121,8 @@ def click_first_comment_button(driver, log_func=print):
         selectors = [
             "//div[@id='column-list-container']//button[contains(@aria-label, 'comment')]",
             "//span[@data-e2e='comment-icon']/ancestor::button",
-            "//strong[@data-e2e='comment-count']/ancestor::button"
+            "//strong[@data-e2e='comment-count']/ancestor::button",
+            "//span[contains(@class, 'xgplayer-icon-comment')]"
         ]
         
         button = None
@@ -197,7 +198,7 @@ def scrape_level1_window_mode(
             try: log_callback(msg)
             except: pass
 
-    log("🚀 Đang khởi tạo trình duyệt...")
+    log("🚀 Đang khởi tạo trình duyệt (Phiên bản cải tiến)...")
     try:
         driver = init_driver(headless=headless, debugger_address=debugger_address)
         log("✅ Đã khởi tạo trình duyệt.")
@@ -228,36 +229,22 @@ def scrape_level1_window_mode(
     if should_stop():
         try: driver.quit()
         except: pass
-        log("\n🛑 Đã dừng theo yêu cầu.")
         return []
     
     log(f"🌍 Đang truy cập: {video_url}")
     driver.get(video_url)
-    if sleep_with_stop(2, stop_event):
+    if sleep_with_stop(3, stop_event): # Tăng time chờ load trang đầu
         try: driver.quit()
         except: pass
-        log("\n🛑 Đã dừng theo yêu cầu.")
-        return []
-
-    if should_stop():
-        try: driver.quit()
-        except: pass
-        log("\n🛑 Đã dừng theo yêu cầu.")
         return []
 
     click_first_comment_button(driver, log)
-    if should_stop():
-        try: driver.quit()
-        except: pass
-        log("\n🛑 Đã dừng theo yêu cầu.")
-        return []
-
+    
     wait_captcha_solved_if_any(driver, log)
 
     if should_stop():
         try: driver.quit()
         except: pass
-        log("\n🛑 Đã dừng theo yêu cầu.")
         return []
 
     data_set = set() 
@@ -279,7 +266,15 @@ def scrape_level1_window_mode(
             captcha_check_counter = 0
         
         try:
+            # Lấy list elements
             comment_text_elements = driver.find_elements(By.CSS_SELECTOR, '[data-e2e="comment-level-1"]')
+            
+            # Nếu tìm thấy comment, scroll tới comment cuối cùng để kích hoạt load thêm
+            if len(comment_text_elements) > 0:
+                try:
+                    last_element = comment_text_elements[-1]
+                    driver.execute_script("arguments[0].scrollIntoView({ behavior: 'auto', block: 'center' });", last_element)
+                except: pass
         except: comment_text_elements = []
 
         count_new_in_loop = 0
@@ -317,8 +312,20 @@ def scrape_level1_window_mode(
             scroll_attempts = 0
             log(f"✅ Lấy thêm {count_new_in_loop} (Tổng: {len(final_list)})")
         
+        # Scroll chính
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        if sleep_with_stop(random.uniform(1.0, 2.0), stop_event):
+        
+        # Thử tìm nút "Xem thêm bình luận" nếu có (đôi khi TikTok hiện nút này thay vì auto scroll)
+        try:
+            load_more_btns = driver.find_elements(By.XPATH, "//div[contains(text(), 'View more comments') or contains(text(), 'Xem thêm bình luận')]")
+            for btn in load_more_btns:
+                if btn.is_displayed():
+                    driver.execute_script("arguments[0].click();", btn)
+                    time.sleep(1)
+        except: pass
+
+        # Tăng thời gian chờ lên ngẫu nhiên 2.5 - 4.5s
+        if sleep_with_stop(random.uniform(2.5, 4.5), stop_event):
             log("\n🛑 Đã dừng theo yêu cầu.")
             break
 
@@ -326,17 +333,19 @@ def scrape_level1_window_mode(
         
         if new_height == last_height:
             scroll_attempts += 1
-            log(f"⏳ Đang thử cuộn lại... ({scroll_attempts}/2)")
-            driver.execute_script("window.scrollBy(0, -400);")
-            if sleep_with_stop(0.5, stop_event):
-                log("\n🛑 Đã dừng theo yêu cầu.")
-                break
+            log(f"⏳ Đang thử cuộn lại... ({scroll_attempts}/3)")
+            
+            # Thao tác cuộn lên xuống để kích hoạt event
+            driver.execute_script("window.scrollBy(0, -300);")
+            time.sleep(0.5)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            if sleep_with_stop(1.5, stop_event):
-                log("\n🛑 Đã dừng theo yêu cầu.")
+            
+            # Chờ lâu hơn một chút ở các lần retry
+            if sleep_with_stop(2.0 + (scroll_attempts * 0.5), stop_event): 
                 break
-            if scroll_attempts >= 2:
-                log("🛑 Đã hết comment.")
+                
+            if scroll_attempts >= 3: # Tăng giới hạn retry lên 10
+                log("🛑 Đã hết comment (hoặc bị chặn tải thêm).")
                 break
         else:
             last_height = new_height
