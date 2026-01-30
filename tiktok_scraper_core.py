@@ -198,7 +198,7 @@ def scrape_level1_window_mode(
             try: log_callback(msg)
             except: pass
 
-    log("🚀 Đang khởi tạo trình duyệt (Phiên bản cải tiến)...")
+    log("🚀 Đang khởi tạo trình duyệt...")
     try:
         driver = init_driver(headless=headless, debugger_address=debugger_address)
         log("✅ Đã khởi tạo trình duyệt.")
@@ -233,7 +233,7 @@ def scrape_level1_window_mode(
     
     log(f"🌍 Đang truy cập: {video_url}")
     driver.get(video_url)
-    if sleep_with_stop(3, stop_event): # Tăng time chờ load trang đầu
+    if sleep_with_stop(2, stop_event):
         try: driver.quit()
         except: pass
         return []
@@ -324,8 +324,8 @@ def scrape_level1_window_mode(
                     time.sleep(1)
         except: pass
 
-        # Tăng thời gian chờ lên ngẫu nhiên 2.5 - 4.5s
-        if sleep_with_stop(random.uniform(2.5, 4.5), stop_event):
+        # Tăng thời gian chờ lên ngẫu nhiên 2 - 3s
+        if sleep_with_stop(random.uniform(2, 3), stop_event):
             log("\n🛑 Đã dừng theo yêu cầu.")
             break
 
@@ -333,7 +333,7 @@ def scrape_level1_window_mode(
         
         if new_height == last_height:
             scroll_attempts += 1
-            log(f"⏳ Đang thử cuộn lại... ({scroll_attempts}/3)")
+            log(f"⏳ Đang thử cuộn lại... ({scroll_attempts}/2)")
             
             # Thao tác cuộn lên xuống để kích hoạt event
             driver.execute_script("window.scrollBy(0, -300);")
@@ -341,10 +341,10 @@ def scrape_level1_window_mode(
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             
             # Chờ lâu hơn một chút ở các lần retry
-            if sleep_with_stop(2.0 + (scroll_attempts * 0.5), stop_event): 
+            if sleep_with_stop(1.5, stop_event): 
                 break
                 
-            if scroll_attempts >= 3: # Tăng giới hạn retry lên 10
+            if scroll_attempts >= 2: # Tăng giới hạn retry lên 10
                 log("🛑 Đã hết comment (hoặc bị chặn tải thêm).")
                 break
         else:
