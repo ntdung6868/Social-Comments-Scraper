@@ -1,0 +1,34 @@
+.env
+.env.*
+build_exe.bat
+build_mac.sh
+dist/
+build/
+*.spec
+*.exe
+*.dmg
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.eggs/
+*.egg-info/
+*.egg
+
+# --- IDE & OS ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Log / tạm ---
+*.log
+.cache/
