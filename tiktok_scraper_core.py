@@ -133,6 +133,18 @@ def wait_captcha_solved_if_any(driver, log_func=print, max_wait_seconds=300):
 
     log_func("[!] Hết thời gian chờ.")
 
+# Sleep có kiểm tra stop_event để dừng sớm
+def sleep_with_stop(seconds, stop_event):
+    if not stop_event:
+        time.sleep(seconds)
+        return False
+    end_time = time.time() + seconds
+    while time.time() < end_time:
+        if stop_event.is_set():
+            return True
+        time.sleep(0.1)
+    return False
+
 # --- 3. HÀM CHẠY CHÍNH ---
 def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=None, stop_event=None):
     def log(msg):
@@ -148,6 +160,15 @@ def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=Non
     except Exception as e:
         log(f"❌ Lỗi khởi tạo trình duyệt: {e}")
         return []
+
+    def should_stop():
+        return stop_event is not None and stop_event.is_set()
+
+    if should_stop():
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
     
     if cookie_file_path:
         log(f"🍪 Đang nạp cookie...")
@@ -159,13 +180,41 @@ def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=Non
                  log("⚠️ Có thể lỗi nạp cookie (hoặc cookie hết hạn).")
         except Exception as e:
             log(f"❌ Lỗi nạp cookie: {e}")
+
+    if should_stop():
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
     
     log(f"🌍 Đang truy cập: {video_url}")
     driver.get(video_url)
-    time.sleep(2)
+    if sleep_with_stop(2, stop_event):
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
+
+    if should_stop():
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
 
     click_first_comment_button(driver, log)
+    if should_stop():
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
+
     wait_captcha_solved_if_any(driver, log)
+
+    if should_stop():
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
 
     data_set = set() 
     final_list = []
@@ -176,7 +225,7 @@ def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=Non
     log("\n⬇️  Bắt đầu quét comment...")
 
     while True:
-        if stop_event is not None and stop_event.is_set():
+        if should_stop():
             log("\n🛑 Đã dừng theo yêu cầu.")
             break
         
@@ -225,7 +274,9 @@ def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=Non
             log(f"✅ Lấy thêm {count_new_in_loop} (Tổng: {len(final_list)})")
         
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(random.uniform(1.0, 2.0))
+        if sleep_with_stop(random.uniform(1.0, 2.0), stop_event):
+            log("\n🛑 Đã dừng theo yêu cầu.")
+            break
 
         new_height = driver.execute_script("return document.body.scrollHeight")
         
@@ -233,9 +284,13 @@ def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=Non
             scroll_attempts += 1
             log(f"⏳ Đang thử cuộn lại... ({scroll_attempts}/2)")
             driver.execute_script("window.scrollBy(0, -400);")
-            time.sleep(0.5)
+            if sleep_with_stop(0.5, stop_event):
+                log("\n🛑 Đã dừng theo yêu cầu.")
+                break
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1.5)
+            if sleep_with_stop(1.5, stop_event):
+                log("\n🛑 Đã dừng theo yêu cầu.")
+                break
             if scroll_attempts >= 2:
                 log("🛑 Đã hết comment.")
                 break

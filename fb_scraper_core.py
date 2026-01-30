@@ -60,6 +60,27 @@ def is_junk_line(text):
         if re.match(p, t): return True
     return False
 
+def sleep_with_stop(seconds, stop_event):
+    if not stop_event:
+        time.sleep(seconds)
+        return False
+    end_time = time.time() + seconds
+    while time.time() < end_time:
+        if stop_event.is_set():
+            return True
+        time.sleep(0.1)
+    return False
+
+def get_scroll_target(driver):
+    try:
+        return driver.find_element(By.CSS_SELECTOR, 'div[role="dialog"]')
+    except Exception:
+        pass
+    try:
+        return driver.execute_script("return document.scrollingElement || document.documentElement;")
+    except Exception:
+        return None
+
 # --- 3. HÀM CHẠY CHÍNH ---
 def run_facebook_scraper(post_url, cookie_path, log_callback, stop_event):
     def log(msg):
@@ -67,13 +88,21 @@ def run_facebook_scraper(post_url, cookie_path, log_callback, stop_event):
         else: print(msg)
 
     driver = init_driver()
+    scroll_target = None
+
+    def should_stop():
+        return stop_event is not None and stop_event.is_set()
     
     # NẠP COOKIE
     if cookie_path and os.path.exists(cookie_path):
         log(f"🍪 Đang nạp cookie...")
         try:
             driver.get("https://www.facebook.com")
-            time.sleep(2)
+            if sleep_with_stop(1, stop_event):
+                try: driver.quit()
+                except: pass
+                log("\n🛑 Đã dừng theo yêu cầu.")
+                return []
             with open(cookie_path, 'r', encoding='utf-8') as f:
                 cookies = json.load(f)
                 if isinstance(cookies, dict) and "cookies" in cookies: cookies = cookies["cookies"]
@@ -84,16 +113,35 @@ def run_facebook_scraper(post_url, cookie_path, log_callback, stop_event):
                     count += 1
                 except: pass
             driver.refresh()
-            time.sleep(3)
+            if sleep_with_stop(1.5, stop_event):
+                try: driver.quit()
+                except: pass
+                log("\n🛑 Đã dừng theo yêu cầu.")
+                return []
             log(f"✅ Đã nạp {count} cookie.")
         except Exception as e:
             log(f"❌ Lỗi nạp cookie: {e}")
     else:
         log("⚠️ Chạy không cookie (Cần đăng nhập tay).")
 
+    if should_stop():
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
+
     log(f"🌍 Đang vào bài viết...")
     driver.get(post_url)
-    time.sleep(5) 
+    if sleep_with_stop(2, stop_event):
+        try: driver.quit()
+        except: pass
+        log("\n🛑 Đã dừng theo yêu cầu.")
+        return []
+
+    try:
+        WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="article"]')))
+    except Exception:
+        pass
 
     # CHUYỂN BỘ LỌC
     log("🔄 Đang chuyển bộ lọc 'Tất cả bình luận'...")
@@ -101,13 +149,21 @@ def run_facebook_scraper(post_url, cookie_path, log_callback, stop_event):
         filter_xpath = "//span[contains(text(), 'Phù hợp nhất') or contains(text(), 'Most relevant')]"
         trigger = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, filter_xpath)))
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();", trigger)
-        time.sleep(2)
+        if sleep_with_stop(1, stop_event):
+            try: driver.quit()
+            except: pass
+            log("\n🛑 Đã dừng theo yêu cầu.")
+            return []
         
         all_xpath = "//span[contains(text(), 'Tất cả bình luận') or contains(text(), 'All comments')]"
         option = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, all_xpath)))
         driver.execute_script("arguments[0].click();", option)
         log("✅ Đã chuyển bộ lọc!")
-        time.sleep(3)
+        if sleep_with_stop(1.2, stop_event):
+            try: driver.quit()
+            except: pass
+            log("\n🛑 Đã dừng theo yêu cầu.")
+            return []
     except:
         log("⚠️ Không tìm thấy bộ lọc (Có thể đã đúng sẵn).")
 
@@ -119,8 +175,16 @@ def run_facebook_scraper(post_url, cookie_path, log_callback, stop_event):
 
     while True:
         # CHECK DỪNG NGAY ĐẦU VÒNG LẶP
-        if stop_event.is_set():
+        if should_stop():
             break
+
+        try:
+            if not scroll_target:
+                scroll_target = get_scroll_target(driver)
+            else:
+                _ = scroll_target.tag_name
+        except Exception:
+            scroll_target = get_scroll_target(driver)
 
         try: container = driver.find_element(By.CSS_SELECTOR, 'div[role="dialog"]')
         except: container = driver
@@ -213,7 +277,8 @@ def run_facebook_scraper(post_url, cookie_path, log_callback, stop_event):
         
         # Ngủ và check dừng liên tục để phản hồi nhanh
         for _ in range(5):
-            if stop_event.is_set(): break
+            if should_stop():
+                break
             time.sleep(0.5)
 
         if no_new_data_count >= 2:
