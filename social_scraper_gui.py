@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import threading
+import json
 import pandas as pd
 import os
 import time
@@ -320,6 +321,49 @@ class TikTokApp(TkinterDnD.Tk):
         self.root.focus_set()
         self.log(f"🔁 Đã chuyển nền tảng: {value}")
 
+    def _is_link_valid(self, link, platform):
+        l = (link or "").lower().strip()
+        p = (platform or "").lower().strip()
+        is_tiktok = "tiktok" in p
+        is_facebook = "facebook" in p
+        if is_tiktok:
+            return "tiktok.com" in l and "facebook.com" not in l and "fb.watch" not in l and "fb.com" not in l
+        if is_facebook:
+            return ("facebook.com" in l or "fb.watch" in l or "fb.com" in l) and "tiktok.com" not in l
+        return False
+
+    def _is_cookie_valid(self, cookie_path, platform):
+        if not cookie_path:
+            return True
+        if not os.path.exists(cookie_path):
+            return False
+        try:
+            with open(cookie_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cookies = data.get("cookies") if isinstance(data, dict) else data
+            if not isinstance(cookies, list):
+                return False
+            domains = []
+            for c in cookies:
+                if isinstance(c, dict):
+                    d = c.get("domain") or c.get("host") or c.get("url") or ""
+                    domains.append(str(d).lower())
+            if not domains:
+                return False
+            p = (platform or "").lower().strip()
+            is_tiktok = "tiktok" in p
+            is_facebook = "facebook" in p
+            if is_tiktok:
+                return any("tiktok.com" in d or "tiktokv.com" in d for d in domains)
+            if is_facebook:
+                return any("facebook.com" in d or "fb.com" in d or "messenger.com" in d for d in domains)
+            return False
+        except Exception:
+            return False
+
+    def _warn_async(self, title, msg):
+        self.after(0, lambda: messagebox.showwarning(title, msg))
+
     def log(self, msg):
         self.log_box.configure(state="normal")
         self.log_box.insert("end", str(msg) + "\n")
@@ -374,9 +418,18 @@ class TikTokApp(TkinterDnD.Tk):
     def on_start(self):
         link = self.entry_link.get().strip()
         cookie = self.cookie_path.get().strip()
+        platform = self.platform.get()
         
         if not link:
             messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập Link Video!")
+            return
+
+        if not self._is_link_valid(link, platform):
+            messagebox.showwarning("Sai nền tảng", "Link không đúng với nền tảng đã chọn.")
+            return
+
+        if cookie and not self._is_cookie_valid(cookie, platform):
+            messagebox.showwarning("Sai cookie", "File cookie không đúng nền tảng hoặc bị lỗi.")
             return
             
         self.stop_event.clear()
@@ -397,6 +450,15 @@ class TikTokApp(TkinterDnD.Tk):
         data = []
         # LOGIC BẤT TỬ: Dù chạy lỗi cũng không sập app
         try:
+            platform = self.platform.get()
+            if not self._is_link_valid(link, platform):
+                self.log("❌ Link không đúng nền tảng đã chọn.")
+                self._warn_async("Sai nền tảng", "Link không đúng với nền tảng đã chọn.")
+                return
+            if cookie and not self._is_cookie_valid(cookie, platform):
+                self.log("❌ Cookie không đúng nền tảng.")
+                self._warn_async("Sai cookie", "File cookie không đúng nền tảng hoặc bị lỗi.")
+                return
             if self.platform.get() == "Facebook":
                 data = run_facebook_scraper(link, cookie if cookie else None, self.log, self.stop_event)
             else:
