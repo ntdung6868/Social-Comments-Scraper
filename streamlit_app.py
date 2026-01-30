@@ -9,6 +9,9 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
 from streamlit_autorefresh import st_autorefresh
 
 from tiktok_scraper_core import run_tiktok_scraper
@@ -16,6 +19,116 @@ from fb_scraper_core import run_facebook_scraper
 
 
 st.set_page_config(page_title="Social Comment Scraper", page_icon="💬", layout="wide")
+
+# ========== AUTHENTICATION ==========
+def load_config():
+    """Load config từ file YAML"""
+    try:
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            return yaml.load(f, Loader=SafeLoader)
+    except FileNotFoundError:
+        return None
+
+
+def save_config(config):
+    """Lưu config vào file YAML"""
+    with open('config.yaml', 'w', encoding='utf-8') as f:
+        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+
+
+def has_users(config):
+    """Kiểm tra đã có user nào trong config chưa"""
+    if not config:
+        return False
+    creds = config.get('credentials', {}) or {}
+    usernames = creds.get('usernames', {}) or {}
+    if not usernames:
+        return False
+    # Lọc bỏ các comment/placeholder
+    real_users = {k: v for k, v in usernames.items() if isinstance(v, dict) and 'password' in v}
+    return len(real_users) > 0
+
+
+def setup_first_admin():
+    """Form tạo admin đầu tiên"""
+    st.title("🔐 Thiết lập tài khoản Admin")
+    st.info("Chưa có tài khoản nào. Vui lòng tạo tài khoản Admin đầu tiên.")
+    
+    with st.form("setup_admin"):
+        username = st.text_input("Username", placeholder="admin")
+        name = st.text_input("Tên hiển thị", placeholder="Administrator")
+        password = st.text_input("Mật khẩu", type="password")
+        password_confirm = st.text_input("Xác nhận mật khẩu", type="password")
+        
+        submitted = st.form_submit_button("🚀 Tạo tài khoản", use_container_width=True)
+        
+        if submitted:
+            if not username or not password:
+                st.error("❌ Vui lòng nhập đầy đủ username và mật khẩu!")
+            elif password != password_confirm:
+                st.error("❌ Mật khẩu xác nhận không khớp!")
+            elif len(password) < 4:
+                st.error("❌ Mật khẩu phải có ít nhất 4 ký tự!")
+            else:
+                # Hash password và lưu (hỗ trợ cả phiên bản cũ và mới của streamlit-authenticator)
+                try:
+                    # Phiên bản mới (>=0.3.0)
+                    hashed_password = stauth.Hasher.hash(password)
+                except (AttributeError, TypeError):
+                    # Phiên bản cũ
+                    hashed_password = stauth.Hasher([password]).generate()[0]
+                
+                config = {
+                    'credentials': {
+                        'usernames': {
+                            username: {
+                                'name': name or username,
+                                'password': hashed_password
+                            }
+                        }
+                    },
+                    'cookie': {
+                        'expiry_days': 30,
+                        'key': f'social_scraper_{username}_{hash(password) % 10000}',
+                        'name': 'social_scraper_auth'
+                    }
+                }
+                
+                save_config(config)
+                st.success(f"✅ Đã tạo tài khoản **{username}** thành công!")
+                st.info("🔄 Đang tải lại trang...")
+                st.rerun()
+    
+    st.stop()
+
+
+# Load config
+config = load_config()
+
+# Kiểm tra nếu chưa có user -> hiển thị form tạo admin
+if not has_users(config):
+    setup_first_admin()
+
+# Tạo authenticator
+authenticator = stauth.Authenticate(
+    config['credentials'],
+    config['cookie']['name'],
+    config['cookie']['key'],
+    config['cookie']['expiry_days'],
+)
+
+# Hiển thị form đăng nhập
+authenticator.login(location='main')
+
+if st.session_state["authentication_status"] is False:
+    st.error("❌ Sai tên đăng nhập hoặc mật khẩu!")
+    st.stop()
+elif st.session_state["authentication_status"] is None:
+    st.warning("👋 Vui lòng đăng nhập để sử dụng ứng dụng.")
+    st.info("💡 Liên hệ admin để được cấp tài khoản.")
+    st.stop()
+
+# ========== ĐÃ ĐĂNG NHẬP THÀNH CÔNG ==========
 
 # Custom CSS: giới hạn chiều rộng 80%, căn giữa, và ẩn autorefresh iframe
 st.markdown("""
@@ -31,7 +144,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💬 Social Comment Scraper")
+# Header với nút Logout
+col_title, col_user = st.columns([4, 1])
+with col_title:
+    st.title("💬 Social Comment Scraper")
+with col_user:
+    st.write("")  # Spacer
+    st.write(f"👤 **{st.session_state['name']}**")
+    authenticator.logout("🚪 Đăng xuất", location='main')
 
 
 # ========== VALIDATION FUNCTIONS ==========

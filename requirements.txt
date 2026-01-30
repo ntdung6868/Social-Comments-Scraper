@@ -1,6 +1,9 @@
 streamlit
 streamlit-autorefresh
+streamlit-authenticator
 pandas
 openpyxl
 selenium
 webdriver-manager
+pyyaml
+bcrypt

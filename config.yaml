@@ -1,0 +1,9 @@
+cookie:
+  expiry_days: 30
+  key: social_scraper_ntdungdev73_6859
+  name: social_scraper_auth
+credentials:
+  usernames:
+    ntdungdev73:
+      name: ntdungdev73
+      password: $2b$12$ngwiZQboidsOwtkhNW0QYO8rbiBx2Qi8.FBWt.uE2vwUP5cdH0zYC
