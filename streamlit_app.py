@@ -215,20 +215,51 @@ def get_scraper_state():
     return ScraperState()
 
 
-@st.cache_resource
-def get_scraper_history():
-    """Lưu trữ 5 lần cào gần nhất"""
+state = get_scraper_state()
+
+# ========== USER HISTORY (File-based) ==========
+import os
+
+USER_DATA_DIR = "user_data"
+
+
+def get_user_history_path(username: str) -> str:
+    """Lấy đường dẫn file lịch sử của user"""
+    os.makedirs(USER_DATA_DIR, exist_ok=True)
+    # Sanitize username để tránh lỗi tên file
+    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-'))
+    return os.path.join(USER_DATA_DIR, f"{safe_username}_history.json")
+
+
+def load_user_history(username: str) -> List:
+    """Load lịch sử của user từ file"""
+    filepath = get_user_history_path(username)
+    try:
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
     return []
 
 
-state = get_scraper_state()
-history = get_scraper_history()
+def save_user_history(username: str, history: List):
+    """Lưu lịch sử của user vào file"""
+    filepath = get_user_history_path(username)
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Lỗi lưu history: {e}")
 
 
 def save_to_history(data: List, platform: str, url: str):
-    """Lưu kết quả vào lịch sử (giữ tối đa 5 lần gần nhất)"""
+    """Lưu kết quả vào lịch sử của user hiện tại (giữ tối đa 5 lần gần nhất)"""
     if not data:
         return
+    
+    username = st.session_state.get("username", "anonymous")
+    history = load_user_history(username)
     
     entry = {
         "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M"),
@@ -244,6 +275,9 @@ def save_to_history(data: List, platform: str, url: str):
     # Giữ tối đa 5 entries
     while len(history) > 5:
         history.pop()
+    
+    # Lưu vào file
+    save_user_history(username, history)
 
 
 def get_comment_count_from_logs():
@@ -522,6 +556,10 @@ Có thể do cookie đã hết hạn hoặc không hợp lệ. Hãy thử:
 # ========== CỘT PHẢI: LỊCH SỬ 5 LẦN CÀO GẦN NHẤT ==========
 with col_right:
     st.subheader("📂 Lịch sử 5 lần cào gần nhất")
+    
+    # Load lịch sử của user hiện tại
+    current_username = st.session_state.get("username", "anonymous")
+    history = load_user_history(current_username)
     
     if history:
         for i, entry in enumerate(history):

@@ -1,0 +1,17 @@
+# File cấu hình mẫu cho Social Comment Scraper
+# Copy file này thành config.yaml và chỉnh sửa theo nhu cầu
+
+credentials:
+  usernames:
+    # Thêm user theo format:
+    # username:
+    #   name: Tên Hiển Thị
+    #   password: $2b$12$... (password đã hash bằng bcrypt)
+    #
+    # Hoặc chạy app lần đầu để tạo admin tự động
+    # Hoặc dùng script: python create_user.py
+
+cookie:
+  expiry_days: 30
+  key: your_secret_key_here_change_this  # QUAN TRỌNG: Đổi key này!
+  name: social_scraper_auth

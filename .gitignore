@@ -32,3 +32,7 @@ Thumbs.db
 # --- Log / tạm ---
 *.log
 .cache/
+
+# --- User data (sensitive) ---
+user_data/
+config.yaml
