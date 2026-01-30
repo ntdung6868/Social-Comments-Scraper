@@ -75,11 +75,34 @@ def extract_id_from_url(url):
     if not url: return "Unknown"
     try:
         parsed = urlparse(url)
-        if "profile.php" in parsed.path:
-            query = parse_qs(parsed.query)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        # Loại bỏ các link hệ thống/bài viết
+        bad_paths = ["/posts/", "/videos/", "/watch/", "/story.php", "/photo", "/photo.php", "/sharer.php", "/hashtag/"]
+        if any(x in path for x in bad_paths):
+            return "Unknown"
+
+        # Case 1: profile.php?id=1000xxx
+        if "profile.php" in path:
             if 'id' in query: return query['id'][0]
-        path_parts = parsed.path.strip("/").split("/")
-        if path_parts: return path_parts[0]
+        
+        # Case 2: /people/Name/1000xxx
+        if "people" in path:
+            parts = path.strip("/").split("/")
+            # Lấy phần số cuối cùng (ID)
+            for part in reversed(parts):
+                if part.isdigit(): return part
+            return parts[-1]
+
+        # Case 3: /username (Clean query params like ?comment_id=...)
+        path_parts = path.strip("/").split("/")
+        if path_parts:
+            candidate = path_parts[0]
+            # Lọc các từ khóa hệ thống
+            system_words = ["watch", "groups", "gaming", "pages", "friends", "events", "messages", "media", "dialog"]
+            if candidate.lower() not in system_words:
+                return candidate
     except: pass
     return "Unknown"
 
@@ -243,8 +266,30 @@ def run_facebook_scraper(
                 # Lấy ID
                 user_id = "Unknown"
                 try:
-                    link_el = item.find_element(By.TAG_NAME, "a")
-                    user_id = extract_id_from_url(link_el.get_attribute("href"))
+                    # Tìm tất cả link, ưu tiên link không phải timestamp
+                    links = item.find_elements(By.TAG_NAME, "a")
+                    debug_links = []
+                    for link in links:
+                        href = link.get_attribute("href")
+                        if not href: continue
+                        debug_links.append(href)
+                        
+                        # Bỏ qua link hashtag, share (GIỮ LẠI link chứa comment_id nhưng phải lọc kỹ)
+                        if any(x in href for x in ["/hashtag/", "sharer.php", "l.php"]):
+                            continue
+                        
+                        # Nếu link chứa /posts/ hoặc /videos/ thì bỏ qua vì đó là link bài viết gốc
+                        if any(x in href for x in ["/posts/", "/videos/", "/watch/"]):
+                            continue
+                            
+                        extracted = extract_id_from_url(href)
+                        if extracted != "Unknown":
+                            user_id = extracted
+                            break
+                    
+                    if user_id == "Unknown" and debug_links:
+                        log(f"⚠️ Debug - Không lấy được ID. Các link tìm thấy: {debug_links}")
+
                 except: pass
 
                 # Lấy Nội dung + Icon
