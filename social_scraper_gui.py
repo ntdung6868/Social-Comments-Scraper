@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 import re
 import importlib
+import sys
 
 try:
     _tkdnd = importlib.import_module("tkinterdnd2")
@@ -15,7 +16,7 @@ try:
     TkinterDnD = _tkdnd.TkinterDnD
 except Exception:
     print("❌ LỖI: Chưa cài tkinterdnd2. Hãy cài bằng: pip install tkinterdnd2")
-    exit()
+    sys.exit(1)
 
 # Import logic (Bắt buộc để chung thư mục)
 try:
