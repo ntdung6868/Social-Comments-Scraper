@@ -5,6 +5,7 @@ import io
 import json
 from dataclasses import dataclass, field
 from typing import List, Optional
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -14,10 +15,19 @@ from tiktok_scraper_core import run_tiktok_scraper
 from fb_scraper_core import run_facebook_scraper
 
 
-st.set_page_config(page_title="Social Comment Scraper", page_icon="💬", layout="centered")
-st.title("💬 Social Comment Scraper")
+st.set_page_config(page_title="Social Comment Scraper", page_icon="💬", layout="wide")
 
-st.markdown("Chọn nền tảng, nhập link, và upload cookie JSON để bắt đầu.")
+# Custom CSS: giới hạn chiều rộng 80% và căn giữa
+st.markdown("""
+<style>
+    .block-container {
+        max-width: 80% !important;
+        margin: 0 auto;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("💬 Social Comment Scraper")
 
 
 # ========== VALIDATION FUNCTIONS ==========
@@ -72,6 +82,8 @@ class ScraperState:
     thread: Optional[threading.Thread] = None
     platform: str = "TikTok"
     comment_count: int = 0  # Đếm số bình luận đã cào
+    data_saved: bool = False  # Đánh dấu đã lưu vào history chưa
+    last_url: str = ""  # URL của lần cào hiện tại
 
 
 @st.cache_resource
@@ -79,7 +91,35 @@ def get_scraper_state():
     return ScraperState()
 
 
+@st.cache_resource
+def get_scraper_history():
+    """Lưu trữ 5 lần cào gần nhất"""
+    return []
+
+
 state = get_scraper_state()
+history = get_scraper_history()
+
+
+def save_to_history(data: List, platform: str, url: str):
+    """Lưu kết quả vào lịch sử (giữ tối đa 5 lần gần nhất)"""
+    if not data:
+        return
+    
+    entry = {
+        "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "platform": platform,
+        "url": url[:50] + "..." if len(url) > 50 else url,
+        "count": len(data),
+        "data": data.copy()
+    }
+    
+    # Thêm vào đầu danh sách
+    history.insert(0, entry)
+    
+    # Giữ tối đa 5 entries
+    while len(history) > 5:
+        history.pop()
 
 
 def get_comment_count_from_logs():
@@ -141,29 +181,6 @@ def get_current_step():
     return "⏳ Đang xử lý..."
 
 
-# ========== AUTO REFRESH KHI ĐANG CHẠY ==========
-if state.status == "running":
-    st_autorefresh(interval=1500, limit=None, key="scraper_refresh")
-
-
-# ========== INPUTS ==========
-is_running = state.status == "running"
-
-platform = st.selectbox(
-    "Nền tảng",
-    ["TikTok", "Facebook"],
-    disabled=is_running,
-    key="platform_select"
-)
-
-link_label = "Link video" if platform == "TikTok" else "Link bài viết"
-link_placeholder = "https://www.tiktok.com/@user/video/..." if platform == "TikTok" else "https://www.facebook.com/...."
-target_url = st.text_input(link_label, placeholder=link_placeholder, disabled=is_running)
-
-cookie_file = st.file_uploader("Cookie JSON (bắt buộc)", type=["json"], disabled=is_running)
-headless = st.toggle("Chạy headless (dành cho Cloud)", value=True, disabled=is_running)
-
-
 # ========== SCRAPER FUNCTION (chạy trong thread) ==========
 def run_scraper_thread(url, cookie_path, platform_name, headless_mode):
     def log(msg):
@@ -199,118 +216,211 @@ def run_scraper_thread(url, cookie_path, platform_name, headless_mode):
         state.status = "done"
 
 
-# ========== VALIDATION REALTIME ==========
-# Hiển thị lỗi ngay khi nhập sai
-validation_errors = []
-
-if target_url.strip() and not is_link_valid(target_url, platform):
-    validation_errors.append(f"❌ Link không đúng nền tảng **{platform}**. Vui lòng kiểm tra lại.")
-
-if cookie_file is not None and not is_cookie_valid(cookie_file.getvalue(), platform):
-    validation_errors.append(f"❌ File cookie không đúng nền tảng **{platform}**. Vui lòng upload cookie của {platform}.")
-
-for err in validation_errors:
-    st.error(err)
-
-
-# ========== BUTTONS ==========
+# ========== AUTO REFRESH KHI ĐANG CHẠY ==========
 if state.status == "running":
-    if st.button("🛑 Dừng lại", type="secondary", use_container_width=True):
-        state.stop_event.set()
-        st.rerun()
-else:
-    if st.button("▶️ Bắt đầu", type="primary", use_container_width=True):
-        # Validate bắt buộc
-        if not target_url.strip():
-            st.warning("⚠️ Vui lòng nhập link.")
-        elif cookie_file is None:
-            st.warning("⚠️ Vui lòng upload file cookie JSON.")
-        elif not is_link_valid(target_url, platform):
-            st.error(f"❌ Link không đúng nền tảng **{platform}**.")
-        elif not is_cookie_valid(cookie_file.getvalue(), platform):
-            st.error(f"❌ File cookie không đúng nền tảng **{platform}**.")
-        else:
-            # Reset state
-            state.stop_event.clear()
-            state.data = []
-            state.log_lines = []
-            state.status = "running"
-            state.platform = platform
-            state.comment_count = 0
-
-            # Chuẩn bị cookie
-            cookie_path = None
-            if cookie_file is not None:
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
-                temp_file.write(cookie_file.getbuffer())
-                temp_file.flush()
-                temp_file.close()
-                cookie_path = temp_file.name
-
-            # Chạy scraper trong thread riêng
-            thread = threading.Thread(
-                target=run_scraper_thread,
-                args=(target_url.strip(), cookie_path, platform, headless),
-                daemon=True
-            )
-            thread.start()
-            state.thread = thread
-
-            st.rerun()
+    st_autorefresh(interval=1500, limit=None, key="scraper_refresh")
 
 
-# ========== HIỂN THỊ TRẠNG THÁI ==========
-if state.status == "running":
-    current_count = get_comment_count_from_logs()
-    current_step = get_current_step()
+# ========== LAYOUT 2 CỘT ==========
+col_left, col_right = st.columns([6.5, 3.5], gap="large")
+
+# ========== CỘT TRÁI: FORM NHẬP LIỆU ==========
+with col_left:
+    st.markdown("Chọn nền tảng, nhập link, và upload cookie JSON để bắt đầu.")
     
-    st.info(f"""
+    is_running = state.status == "running"
+
+    platform = st.selectbox(
+        "Nền tảng",
+        ["TikTok", "Facebook"],
+        disabled=is_running,
+        key="platform_select"
+    )
+
+    link_label = "Link video" if platform == "TikTok" else "Link bài viết"
+    link_placeholder = "https://www.tiktok.com/@user/video/..." if platform == "TikTok" else "https://www.facebook.com/...."
+    target_url = st.text_input(link_label, placeholder=link_placeholder, disabled=is_running)
+
+    cookie_file = st.file_uploader("Cookie JSON (bắt buộc)", type=["json"], disabled=is_running)
+    headless = st.toggle("Chạy headless (dành cho Cloud)", value=True, disabled=is_running)
+
+    # ========== VALIDATION REALTIME ==========
+    validation_errors = []
+
+    if target_url.strip() and not is_link_valid(target_url, platform):
+        validation_errors.append(f"❌ Link không đúng nền tảng **{platform}**. Vui lòng kiểm tra lại.")
+
+    if cookie_file is not None and not is_cookie_valid(cookie_file.getvalue(), platform):
+        validation_errors.append(f"❌ File cookie không đúng nền tảng **{platform}**. Vui lòng upload cookie của {platform}.")
+
+    for err in validation_errors:
+        st.error(err)
+
+    # ========== BUTTONS ==========
+    if state.status == "running":
+        if st.button("🛑 Dừng lại", type="secondary", use_container_width=True):
+            state.stop_event.set()
+            st.rerun()
+    else:
+        if st.button("▶️ Bắt đầu", type="primary", use_container_width=True):
+            # Validate bắt buộc
+            if not target_url.strip():
+                st.warning("⚠️ Vui lòng nhập link.")
+            elif cookie_file is None:
+                st.warning("⚠️ Vui lòng upload file cookie JSON.")
+            elif not is_link_valid(target_url, platform):
+                st.error(f"❌ Link không đúng nền tảng **{platform}**.")
+            elif not is_cookie_valid(cookie_file.getvalue(), platform):
+                st.error(f"❌ File cookie không đúng nền tảng **{platform}**.")
+            else:
+                # Reset state
+                state.stop_event.clear()
+                state.data = []
+                state.log_lines = []
+                state.status = "running"
+                state.platform = platform
+                state.comment_count = 0
+                state.data_saved = False  # Reset flag để cho phép lưu history
+                state.last_url = target_url.strip()  # Lưu URL hiện tại
+
+                # Chuẩn bị cookie
+                cookie_path = None
+                if cookie_file is not None:
+                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
+                    temp_file.write(cookie_file.getbuffer())
+                    temp_file.flush()
+                    temp_file.close()
+                    cookie_path = temp_file.name
+
+                # Chạy scraper trong thread riêng
+                thread = threading.Thread(
+                    target=run_scraper_thread,
+                    args=(target_url.strip(), cookie_path, platform, headless),
+                    daemon=True
+                )
+                thread.start()
+                state.thread = thread
+
+                st.rerun()
+
+    # ========== HIỂN THỊ TRẠNG THÁI ==========
+    if state.status == "running":
+        current_count = get_comment_count_from_logs()
+        current_step = get_current_step()
+        
+        st.info(f"""
 **{current_step}**
 
 📊 Đã cào được: **{current_count}** bình luận
-    """)
-    st.caption("🔄 Tự động cập nhật mỗi 1.5s | Bấm **🛑 Dừng lại** để dừng và lưu dữ liệu")
+        """)
+        st.caption("🔄 Tự động cập nhật mỗi 1.5s | Bấm **🛑 Dừng lại** để dừng và lưu dữ liệu")
 
-    # Kiểm tra thread còn chạy không
-    if state.thread and not state.thread.is_alive():
-        st.rerun()
+        # Kiểm tra thread còn chạy không
+        if state.thread and not state.thread.is_alive():
+            st.rerun()
 
-elif state.status == "stopped":
-    platform_name = state.platform.lower()
-    if state.data:
-        df = pd.DataFrame(state.data)
-        st.warning(f"🛑 Đã dừng theo yêu cầu. Lấy được **{len(df)}** bình luận.")
-        st.dataframe(df, use_container_width=True)
-        
-        # Export Excel
-        buffer = io.BytesIO()
-        df.to_excel(buffer, index=False, engine='openpyxl')
-        buffer.seek(0)
-        st.download_button(
-            "📥 Tải Excel",
-            data=buffer,
-            file_name=f"{platform_name}_comments.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+    elif state.status == "stopped":
+        platform_name = state.platform.lower()
+        if state.data:
+            # Lưu vào history và reset về idle
+            if not getattr(state, 'data_saved', False):
+                save_to_history(state.data, state.platform, getattr(state, 'last_url', ''))
+                state.data_saved = True
+                
+                # Hiển thị thông báo 1 lần rồi reset
+                df = pd.DataFrame(state.data)
+                st.warning(f"🛑 Đã dừng theo yêu cầu. Lấy được **{len(df)}** bình luận. Đã lưu vào lịch sử.")
+                st.dataframe(df, use_container_width=True)
+                
+                # Export Excel
+                buffer = io.BytesIO()
+                df.to_excel(buffer, index=False, engine='openpyxl')
+                buffer.seek(0)
+                st.download_button(
+                    "📥 Tải Excel",
+                    data=buffer,
+                    file_name=f"{platform_name}_comments.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                # Đã lưu rồi, reset về idle
+                state.status = "idle"
+                state.data = []
+                st.rerun()
+        else:
+            st.warning("🛑 Đã dừng theo yêu cầu. Chưa có dữ liệu.")
+            state.status = "idle"
+
+    elif state.status == "done":
+        platform_name = state.platform.lower()
+        if state.data:
+            # Lưu vào history và reset về idle
+            if not getattr(state, 'data_saved', False):
+                save_to_history(state.data, state.platform, getattr(state, 'last_url', ''))
+                state.data_saved = True
+                
+                # Hiển thị thông báo 1 lần rồi reset
+                df = pd.DataFrame(state.data)
+                st.success(f"✅ Hoàn thành! Đã lấy **{len(df)}** bình luận. Đã lưu vào lịch sử.")
+                st.dataframe(df, use_container_width=True)
+                
+                # Export Excel
+                buffer = io.BytesIO()
+                df.to_excel(buffer, index=False, engine='openpyxl')
+                buffer.seek(0)
+                st.download_button(
+                    "📥 Tải Excel",
+                    data=buffer,
+                    file_name=f"{platform_name}_comments.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                # Đã lưu rồi, reset về idle
+                state.status = "idle"
+                state.data = []
+                st.rerun()
+        else:
+            st.error("""
+⚠️ **Không lấy được dữ liệu.**
+
+Có thể do cookie đã hết hạn hoặc không hợp lệ. Hãy thử:
+1. Đăng xuất khỏi tài khoản trên trình duyệt
+2. Đăng nhập lại
+3. Xuất cookie mới và thử lại
+
+**Đối với TikTok:**
+- Sau khi đăng nhập nếu không hiện capcha thì hãy giữ tab ở đó khoảng **5 - 10 phút** rồi quay lại giải captcha (nếu có)
+- Đợi giải captcha xong hãy lấy cookie
+- Cookie chỉ có hiệu lực sau khi đã vượt qua captcha
+            """)
+            state.status = "idle"
+
+# ========== CỘT PHẢI: LỊCH SỬ 5 LẦN CÀO GẦN NHẤT ==========
+with col_right:
+    st.subheader("📂 Lịch sử 5 lần cào gần nhất")
+    
+    if history:
+        for i, entry in enumerate(history):
+            with st.expander(f"**{entry['platform']}** - {entry['count']} bình luận - {entry['timestamp']}"):
+                st.caption(f"🔗 {entry['url']}")
+                
+                # Hiển thị preview data
+                df_preview = pd.DataFrame(entry['data'])
+                st.dataframe(df_preview.head(5), use_container_width=True)
+                
+                if len(entry['data']) > 5:
+                    st.caption(f"... và {len(entry['data']) - 5} bình luận khác")
+                
+                # Nút tải về
+                buffer = io.BytesIO()
+                pd.DataFrame(entry['data']).to_excel(buffer, index=False, engine='openpyxl')
+                buffer.seek(0)
+                st.download_button(
+                    f"📥 Tải Excel ({entry['count']} bình luận)",
+                    data=buffer,
+                    file_name=f"{entry['platform'].lower()}_comments_{entry['timestamp'].replace('/', '-').replace(':', '-').replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"download_history_{i}"
+                )
     else:
-        st.warning("🛑 Đã dừng theo yêu cầu. Chưa có dữ liệu.")
-
-elif state.status == "done":
-    platform_name = state.platform.lower()
-    if state.data:
-        df = pd.DataFrame(state.data)
-        st.success(f"✅ Hoàn thành! Đã lấy **{len(df)}** bình luận.")
-        st.dataframe(df, use_container_width=True)
-        
-        # Export Excel
-        buffer = io.BytesIO()
-        df.to_excel(buffer, index=False, engine='openpyxl')
-        buffer.seek(0)
-        st.download_button(
-            "📥 Tải Excel",
-            data=buffer,
-            file_name=f"{platform_name}_comments.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    else:
-        st.warning("Không lấy được dữ liệu.")
+        st.caption("Chưa có lịch sử cào nào.")
