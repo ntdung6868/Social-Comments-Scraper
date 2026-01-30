@@ -2,6 +2,7 @@ import tempfile
 import threading
 import re
 import io
+import json
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -16,7 +17,49 @@ from fb_scraper_core import run_facebook_scraper
 st.set_page_config(page_title="Social Comment Scraper", page_icon="💬", layout="centered")
 st.title("💬 Social Comment Scraper")
 
-st.markdown("Chọn nền tảng, nhập link, và (tuỳ chọn) upload cookie JSON.")
+st.markdown("Chọn nền tảng, nhập link, và upload cookie JSON để bắt đầu.")
+
+
+# ========== VALIDATION FUNCTIONS ==========
+def is_link_valid(link: str, platform: str) -> bool:
+    """Kiểm tra link có đúng nền tảng không"""
+    l = (link or "").lower().strip()
+    p = (platform or "").lower().strip()
+    is_tiktok = "tiktok" in p
+    is_facebook = "facebook" in p
+    if is_tiktok:
+        return "tiktok.com" in l and "facebook.com" not in l and "fb.watch" not in l and "fb.com" not in l
+    if is_facebook:
+        return ("facebook.com" in l or "fb.watch" in l or "fb.com" in l) and "tiktok.com" not in l
+    return False
+
+
+def is_cookie_valid(cookie_content: bytes, platform: str) -> bool:
+    """Kiểm tra cookie có đúng nền tảng không"""
+    if not cookie_content:
+        return False
+    try:
+        data = json.loads(cookie_content.decode("utf-8"))
+        cookies = data.get("cookies") if isinstance(data, dict) else data
+        if not isinstance(cookies, list):
+            return False
+        domains = []
+        for c in cookies:
+            if isinstance(c, dict):
+                d = c.get("domain") or c.get("host") or c.get("url") or ""
+                domains.append(str(d).lower())
+        if not domains:
+            return False
+        p = (platform or "").lower().strip()
+        is_tiktok = "tiktok" in p
+        is_facebook = "facebook" in p
+        if is_tiktok:
+            return any("tiktok.com" in d or "tiktokv.com" in d for d in domains)
+        if is_facebook:
+            return any("facebook.com" in d or "fb.com" in d or "messenger.com" in d for d in domains)
+        return False
+    except Exception:
+        return False
 
 
 # ========== SHARED STATE (persist qua các rerun) ==========
@@ -117,7 +160,7 @@ link_label = "Link video" if platform == "TikTok" else "Link bài viết"
 link_placeholder = "https://www.tiktok.com/@user/video/..." if platform == "TikTok" else "https://www.facebook.com/...."
 target_url = st.text_input(link_label, placeholder=link_placeholder, disabled=is_running)
 
-cookie_file = st.file_uploader("Cookie JSON (tuỳ chọn)", type=["json"], disabled=is_running)
+cookie_file = st.file_uploader("Cookie JSON (bắt buộc)", type=["json"], disabled=is_running)
 headless = st.toggle("Chạy headless (dành cho Cloud)", value=True, disabled=is_running)
 
 
@@ -156,6 +199,20 @@ def run_scraper_thread(url, cookie_path, platform_name, headless_mode):
         state.status = "done"
 
 
+# ========== VALIDATION REALTIME ==========
+# Hiển thị lỗi ngay khi nhập sai
+validation_errors = []
+
+if target_url.strip() and not is_link_valid(target_url, platform):
+    validation_errors.append(f"❌ Link không đúng nền tảng **{platform}**. Vui lòng kiểm tra lại.")
+
+if cookie_file is not None and not is_cookie_valid(cookie_file.getvalue(), platform):
+    validation_errors.append(f"❌ File cookie không đúng nền tảng **{platform}**. Vui lòng upload cookie của {platform}.")
+
+for err in validation_errors:
+    st.error(err)
+
+
 # ========== BUTTONS ==========
 if state.status == "running":
     if st.button("🛑 Dừng lại", type="secondary", use_container_width=True):
@@ -163,8 +220,15 @@ if state.status == "running":
         st.rerun()
 else:
     if st.button("▶️ Bắt đầu", type="primary", use_container_width=True):
+        # Validate bắt buộc
         if not target_url.strip():
-            st.warning("Vui lòng nhập link.")
+            st.warning("⚠️ Vui lòng nhập link.")
+        elif cookie_file is None:
+            st.warning("⚠️ Vui lòng upload file cookie JSON.")
+        elif not is_link_valid(target_url, platform):
+            st.error(f"❌ Link không đúng nền tảng **{platform}**.")
+        elif not is_cookie_valid(cookie_file.getvalue(), platform):
+            st.error(f"❌ File cookie không đúng nền tảng **{platform}**.")
         else:
             # Reset state
             state.stop_event.clear()
