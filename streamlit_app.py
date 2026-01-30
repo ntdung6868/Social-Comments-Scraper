@@ -17,12 +17,16 @@ from fb_scraper_core import run_facebook_scraper
 
 st.set_page_config(page_title="Social Comment Scraper", page_icon="💬", layout="wide")
 
-# Custom CSS: giới hạn chiều rộng 80% và căn giữa
+# Custom CSS: giới hạn chiều rộng 80%, căn giữa, và ẩn autorefresh iframe
 st.markdown("""
 <style>
     .block-container {
         max-width: 80% !important;
         margin: 0 auto;
+    }
+    /* Ẩn iframe của st_autorefresh */
+    .st-key-scraper_refresh {
+        display: none !important;
     }
 </style>
 """, unsafe_allow_html=True)
