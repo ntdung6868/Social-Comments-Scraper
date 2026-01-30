@@ -2,6 +2,7 @@ import time
 import json
 import os
 import re
+import shutil
 import pandas as pd
 from urllib.parse import urlparse, parse_qs
 from selenium import webdriver
@@ -12,13 +13,49 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # --- 1. KHỞI TẠO DRIVER ---
-def init_driver():
+def _should_run_headless():
+    if "HEADLESS" in os.environ:
+        return os.environ.get("HEADLESS", "1") != "0"
+    if os.name in ("nt", "darwin"):
+        return False
+    if os.environ.get("DISPLAY"):
+        return False
+    return True
+
+
+def init_driver(headless=None, debugger_address=None):
     options = webdriver.ChromeOptions()
     options.add_argument("--disable-notifications")
     options.add_experimental_option('excludeSwitches', ['enable-logging'])
     options.add_argument("--disable-blink-features=AutomationControlled")
+
+    if debugger_address:
+        options.add_experimental_option("debuggerAddress", debugger_address)
     
-    service = Service(ChromeDriverManager().install())
+    if headless is None:
+        headless = _should_run_headless()
+    if headless and not debugger_address:
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1280,720")
+
+    chrome_bin = os.environ.get("CHROME_BIN") or os.environ.get("GOOGLE_CHROME_BIN")
+    if not chrome_bin:
+        for path in ("/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"):
+            if os.path.exists(path):
+                chrome_bin = path
+                break
+    if chrome_bin:
+        options.binary_location = chrome_bin
+
+    driver_path = (
+        os.environ.get("CHROMEDRIVER_PATH")
+        or shutil.which("chromedriver")
+        or shutil.which("chromium-driver")
+    )
+    service = Service(driver_path) if driver_path else Service(ChromeDriverManager().install())
     if os.name == 'nt':
         service.creation_flags = 0x08000000 
     
@@ -82,12 +119,19 @@ def get_scroll_target(driver):
         return None
 
 # --- 3. HÀM CHẠY CHÍNH ---
-def run_facebook_scraper(post_url, cookie_path, log_callback, stop_event):
+def run_facebook_scraper(
+    post_url,
+    cookie_path,
+    log_callback,
+    stop_event,
+    headless=None,
+    debugger_address=None,
+):
     def log(msg):
         if log_callback: log_callback(msg)
         else: print(msg)
 
-    driver = init_driver()
+    driver = init_driver(headless=headless, debugger_address=debugger_address)
     scroll_target = None
 
     def should_stop():

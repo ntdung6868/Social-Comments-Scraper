@@ -4,6 +4,7 @@ import os
 import glob
 import random
 import re
+import shutil
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -15,13 +16,49 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # --- 1. KHỞI TẠO DRIVER ---
-def init_driver():
+def _should_run_headless():
+    if "HEADLESS" in os.environ:
+        return os.environ.get("HEADLESS", "1") != "0"
+    if os.name in ("nt", "darwin"):
+        return False
+    if os.environ.get("DISPLAY"):
+        return False
+    return True
+
+
+def init_driver(headless=None, debugger_address=None):
     options = webdriver.ChromeOptions()
     options.add_argument("--disable-notifications")
     options.add_experimental_option('excludeSwitches', ['enable-logging'])
     options.add_argument("--disable-blink-features=AutomationControlled")
+
+    if debugger_address:
+        options.add_experimental_option("debuggerAddress", debugger_address)
     
-    service = Service(ChromeDriverManager().install())
+    if headless is None:
+        headless = _should_run_headless()
+    if headless and not debugger_address:
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1280,720")
+
+    chrome_bin = os.environ.get("CHROME_BIN") or os.environ.get("GOOGLE_CHROME_BIN")
+    if not chrome_bin:
+        for path in ("/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"):
+            if os.path.exists(path):
+                chrome_bin = path
+                break
+    if chrome_bin:
+        options.binary_location = chrome_bin
+
+    driver_path = (
+        os.environ.get("CHROMEDRIVER_PATH")
+        or shutil.which("chromedriver")
+        or shutil.which("chromium-driver")
+    )
+    service = Service(driver_path) if driver_path else Service(ChromeDriverManager().install())
     if os.name == 'nt':
         service.creation_flags = 0x08000000 
     
@@ -146,7 +183,14 @@ def sleep_with_stop(seconds, stop_event):
     return False
 
 # --- 3. HÀM CHẠY CHÍNH ---
-def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=None, stop_event=None):
+def scrape_level1_window_mode(
+    video_url,
+    cookie_file_path=None,
+    log_callback=None,
+    stop_event=None,
+    headless=None,
+    debugger_address=None,
+):
     def log(msg):
         print(msg)
         if log_callback:
@@ -155,7 +199,7 @@ def scrape_level1_window_mode(video_url, cookie_file_path=None, log_callback=Non
 
     log("🚀 Đang khởi tạo trình duyệt...")
     try:
-        driver = init_driver()
+        driver = init_driver(headless=headless, debugger_address=debugger_address)
         log("✅ Đã khởi tạo trình duyệt.")
     except Exception as e:
         log(f"❌ Lỗi khởi tạo trình duyệt: {e}")

@@ -96,6 +96,19 @@ Nếu gặp **"Windows protected your PC"**:
 - **Captcha:** Giải captcha trên Chrome rồi chờ tool chạy tiếp.
 - **Không cào được:** Kiểm tra link, cookie và mạng.
 
+## Streamlit Cloud
+
+App web dùng file `streamlit_app.py`. Repo đã có sẵn `requirements.txt` và `packages.txt`.
+
+Các bước triển khai:
+
+1. Đẩy code lên GitHub.
+2. Vào https://streamlit.io/cloud → **New app**.
+3. Chọn repo + branch, đặt **Main file path** = `streamlit_app.py`.
+4. Deploy và chờ build xong.
+
+Lưu ý: Cloud chạy headless nên nếu gặp captcha sẽ không thể giải tay.
+
 ## Lưu ý
 
 - Chỉ dùng cho mục đích học tập/nghiên cứu.
